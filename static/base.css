@@ -1,0 +1,59 @@
+:root {
+    --accent-color: #b44fc2;
+    --bg-color: #493d5b;
+}
+
+html {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    background-color: var(--bg-color);
+    accent-color: var(--accent-color);
+    color-scheme: dark;
+    --primary-color: var(--accent-color);
+    --accent-color: var(--accent-color);
+}
+
+body {
+    margin: 4px;
+}
+
+.container {
+    border: 3px solid #ab47b8;
+    border-radius: 2px;
+    padding: 20px;
+    background-color: rgba(212, 99, 226, 0.4);
+    backdrop-filter: blur(10px);
+}
+
+.button {
+    border: 1px solid #ab47b8;
+    border-radius: 2px;
+    padding: 6px;
+    background-color: rgba(212, 99, 226, 0.4);
+    backdrop-filter: blur(10px);
+    cursor: pointer;
+    transition: 0.5s;
+}
+
+.button:hover {
+    background-color: rgba(212, 99, 226, 0.5);
+    border: 2px solid #ab47b8;
+    transition: 0.5s;
+}
+
+.input {
+    border: 1px solid #ab47b8;
+    border-radius: 2px;
+    padding: 6px;
+    background-color: rgba(212, 99, 226, 0.4);
+    backdrop-filter: blur(10px);
+}
+
+.listingItem {
+    border: 3px solid #ab47b8;
+    border-radius: 2px;
+    padding: 6px;
+    background-color: rgba(212, 99, 226, 0.4);
+    backdrop-filter: blur(10px);
+    width: 100%;
+    cursor: pointer;
+}

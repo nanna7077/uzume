@@ -1,0 +1,6 @@
+flask
+flask-sqlalchemy
+waitress
+pam
+watchdog
+pyffmpeg

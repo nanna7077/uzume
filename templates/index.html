@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="static/base.css">
+    <link rel="icon" href="static/uzume-nobg-icon.png">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Uzume Player">
+    <meta name="twitter:description" content="{{INSTANCE_DESCRIPTION}}">
+
+    <title>Uzume Player | {{INSTANCE_NAME}}</title>
+</head>
+
+<body>
+    <div style="top: 0; left: 0; position: absolute; padding: 2px; margin: 2px; height: 4vh; display: flex; align-items: center;">
+        <div style="font-size: 1.1rem;" onclick="window.location.href='/'">Uzume | {{INSTANCE_NAME}}</div>
+    </div>
+    <div style="position: fixed; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 99vh; width: 95vw; gap: 10vh; margin-top: 6vh; overflow: scroll;">
+
+        {% if not IS_FIRST_RUN %}
+            <div style="bottom: 0; left: 0; margin: 4px; position: fixed; display: flex; gap: 2px;">
+                <button class="button" onclick="enable_single_page('add_folder')">Add Folder</button>
+                <button class="button">Current Convertions: {{CURRENT_CONVERTIONS_COUNT}}</button>
+            </div>
+
+            <div style="bottom: 0; right: 0; margin: 2px; position: fixed; display: flex; gap: 2px;">
+                <img src="static/uzume-nobg.png" style="height: 20vh;">
+            </div>
+        {% endif %}
+
+        <video controls preload="auto" data-setup="{}" id="player" style="display: none;"></video>
+
+        <div class="container"
+            style="width: fit-content; display: none; justify-content: center; align-items: center; gap: 10px;"
+            id="firstSetup_successpage">
+            <img src="static/uzume-nobg.png" style="height: 40vh;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 2rem;">Success!</div>
+                <div>Welcome to Uzume Player!</div>
+                <div>Uzume is ready to use!</div>
+                <button class="button" onclick="window.location.reload()">Start Watching!</button>
+            </div>
+        </div>
+
+        <div class="container"
+            style="width: fit-content; display: none; justify-content: center; align-items: center; gap: 10px;"
+            id="firstSetup_errorpage">
+            <img src="static/uzume-nobg.png" style="height: 40vh;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 2rem;">Error :(</div>
+                <div id="firstSetup_error_message"></div>
+                <button class="button" onclick="enable_single_page('firstSetup_page1')">Retry</button>
+            </div>
+        </div>
+
+        <div class="container"
+            style="width: fit-content; display: none; justify-content: center; align-items: center; gap: 10px;"
+            id="firstSetup_page1">
+            <img src="static/uzume-nobg.png" style="height: 40vh;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 2rem;">Hello!</div>
+                <div>Welcome to Uzume Player!</div>
+                <div>Please complete this first time setup to get started!</div>
+                <button class="button" onclick="enable_single_page('firstSetup_page2')">Continue</button>
+            </div>
+        </div>
+
+        <div class="container"
+            style="width: fit-content; display: none; flex-direction: column; gap: 10px; flex-wrap: wrap;"
+            id="firstSetup_page2">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="font-size: 1.3rem; font-weight: bold;">First Time Setup</div>
+                <button class="button" style="border-radius: 100%; width: 32px; height: 32px;"
+                    onclick="enable_single_page('firstSetup_page1')">←</button>
+            </div>
+            <div style="width: 100%;"></div>
+            <div>Name this instance of Uzume</div>
+            <input class="input" name="instance_name" id="firstSetup_instance_name" placeholder="Home Server">
+            <div>Description this instance of Uzume</div>
+            <textarea rows="3" class="input" name="instance_description" id="firstSetup_instance_description"
+                placeholder="Describe your shared content"></textarea>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <button class="button" onclick="save_content_firstSetup_page2()">Continue</button>
+            </div>
+        </div>
+
+        <div class="container"
+            style="width: 80%; display: none; flex-direction: column; gap: 10px;"
+            id="filelisting">
+            <div style="font-size: 1.3rem; font-weight: bold;">Directories</div>
+            <div style="font-size: .9rem;">Current Path&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="font-family: 'Courier New', Courier, monospace; font-size: 1rem;" id="currentpath"></span></div>
+            <div
+                style="width: 100%; margin-top: 10px; display: flex; gap: 10px; max-height: 50vh; overflow-y: scroll; overflow-x: hidden; flex-wrap: wrap;" 
+                id="filelisting_content">
+                
+            </div>
+        </div>
+
+        <div class="container"
+            style="width: 80%; display: none; flex-direction: column; gap: 10px;"
+            id="filelisting_error">
+            <div style="font-size: 1.3rem; font-weight: bold;">Error</div>
+            <div id="filelisting_error_message"></div>
+            <button class="button" onclick="window.location.reload()">Retry</button>
+        </div>
+
+        <div class="container"
+            style="width: 80%; display: none; flex-direction: column; gap: 10px;"
+            id="play_error">
+            <div style="font-size: 1.3rem; font-weight: bold;">Error</div>
+            <div id="play_error_message"></div>
+            <button class="button" onclick="window.location.reload()">Retry</button>
+        </div>
+
+        <div class="container"
+            style="width: 80%; display: none; flex-direction: column; gap: 10px;"
+            id="add_folder">
+            <div style="font-size: 1.3rem; font-weight: bold;">Add Folder</div>
+            <input class="input" name="add_folder_path" id="add_folder_path" placeholder="Folder Path (Full path from root (Ex. /home/user/folder))">
+            <button class="button" onclick="add_folder()">Add Folder</button>
+        </div>
+
+</body>
+
+<script>
+    const all_possible_pages = [
+        "firstSetup_successpage",
+        "firstSetup_errorpage",
+        "firstSetup_page1",
+        "firstSetup_page2",
+        "filelisting",
+        "filelisting_error",
+        "add_folder",
+        "play_error"
+    ]
+
+    function add_folder() {
+        const path = document.getElementById("add_folder_path").value.trim()
+        const username = prompt("Username (Login with your system credentials of any user)").trim()
+        const password = prompt("Password for " + username)
+
+        if (path == "" || username == "" || password == "") {
+            alert("All fields are required")
+            return
+        }
+
+        fetch("/addpath", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                "path": path,
+                "username": username,
+                "password": password
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                enable_single_page("filelisting_error");
+                document.getElementById("filelisting_error_message").innerHTML = data.error;
+                return
+            }
+            enable_single_page("filelisting");
+        })
+    }
+
+    function load_filelisting() {
+        const URLParams = new URLSearchParams(window.location.search);
+        var current = URLParams.get("current");
+
+        if (!current) current = "/"
+        else current = current.replace("?current=", "");
+
+        document.getElementById("currentpath").innerHTML = current
+
+        fetch("/filelisting", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                "path": current ? current : "/"
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                enable_single_page("filelisting_error");
+                document.getElementById("filelisting_error_message").innerHTML = data.error;
+                return
+            }
+            document.getElementById("currentpath").innerHTML = data.current;
+            var content = "";
+            for (const path of data.paths) {
+                if (path.is_dir) content += `<div class="listingItem" onclick="window.location.href = '/?current=${path.path}'"> ${ (path.path.substring(0, data.current.length) == data.current) ? path.path : '.. (Back)'}</div>`
+                else content += `<div class="listingItem" onclick="window.location.href = '/?play=${path.path}&current=${data.current}'">${path.path} ${ path.convertion ? path.convertion.status == 0 ? ' (Converting - Not Ready for Playback)': '' : '' }</div>`
+            }
+            document.getElementById("filelisting_content").innerHTML = content;
+        })
+
+    }
+
+    function enable_single_page(page) {
+        for (const page of all_possible_pages) {
+            document.getElementById(page).style.display = "none";
+        }
+        document.getElementById(page).style.display = "flex";
+
+        if (page == "filelisting") {
+            load_filelisting()
+        }
+    }
+
+    function save_content_firstSetup_page2() {
+        const instance_name = document.getElementById("firstSetup_instance_name").value
+        const instance_description = document.getElementById("firstSetup_instance_description").value
+
+        if (instance_name == "") {
+            alert("Please enter a name for this instance of Uzume")
+            return
+        }
+        if (instance_description == "") {
+            alert("Please enter a description for this instance of Uzume")
+            return
+        }
+
+        fetch("/firstSetup", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                "instance_name": instance_name,
+                "instance_description": instance_description
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data["message"] == "Success") {
+                    enable_single_page('firstSetup_successpage');
+                } else {
+                    window.getElementById("firstSetup_error_message").innerText = data.error;
+                    enable_single_page('firstSetup_errorpage');
+                }
+            })
+    }
+
+    {% if IS_FIRST_RUN %}
+    enable_single_page('firstSetup_page1');
+    {% else %}
+    enable_single_page('filelisting');
+    {% endif %}
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("play")) {
+        var playURL = urlParams.get("play");
+        playURL = playURL.replace("?play=", "");
+
+        fetch("/streamready?path=" + playURL)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                document.getElementById("play_error_message").innerHTML = data.error;
+                enable_single_page("play_error");
+                return;
+            }
+
+            console.log(data)
+
+            document.getElementById("player").style.display = "block";
+            const newsource = document.createElement("source");
+            newsource.src = "/stream?path=" + playURL;
+            document.getElementById("player").innerHTML = "";
+            document.getElementById("player").appendChild(newsource);
+            
+            document.getElementById("player").addEventListener("error", (e) => {
+                document.getElementById("play_error_message").innerHTML = e.error;
+                enable_single_page("play_error");
+            })
+
+        })
+    } else {
+        document.getElementById("player").display = "none";
+    }
+
+</script>
+
+</html>

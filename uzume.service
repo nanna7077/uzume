@@ -1,0 +1,9 @@
+[Unit]
+Description=Uzume Video Streamer Startup Service
+
+[Service]
+Type=simple
+ExecStart=/opt/uzume/launcher.py
+
+[Install]
+WantedBy=multi-user.target

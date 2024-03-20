@@ -1,106 +1,50 @@
 import os
 import sys
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import multiprocessing
-import shutil
-import datetime
-from flask import Flask, render_template, request, jsonify, Response, send_file
+import threading
+import time
+from flask import Flask, render_template, request, jsonify, Response, send_from_directory
+from flask_cors import CORS
 import hashlib
 import pam
 import pyffmpeg
 
 from models import *
-from defaultConfig import DEFAULT_CONFIG, UNSUPPORTED_FILETYPES
+from defaultConfig import DEFAULT_CONFIG
 
 app = Flask(__name__)
+CORS(app)
 
-CACHEDIR = None
 CONFIGDIR = None
+CACHEDIR = "/tmp/uzume"
+LIMITCPU = True
+streamCleanerThread = None
 
-def hash_file(file_name):
-    """Return the SHA1 hash of a file"""
-    with open(file_name, 'rb') as f:
-        data = f.read(1024)
-        hasher = hashlib.sha1()
-        while data:
-            hasher.update(data)
-            data = f.read(1024)
-    return hasher.hexdigest()
+runningStreams = {}
 
-def unsupported_file_converter(path, newpath):
-    def free_space_check():
-        total, used, free = shutil.disk_usage(CACHEDIR)
-        return free // (2**30)
-    
-    while (free_space_check() < 15 or os.listdir(CACHEDIR) == 0):
-        print("[INFO] Cache is full. Cleaning up.")
-        for file in sorted(os.listdir(CACHEDIR), key=os.path.getmtime):
-            os.remove(os.path.join(CACHEDIR, file))
-    if free_space_check() < 15:
-        print("[ERROR] Cache drive is full. Nothing to cleanup. Aborting.")
-        return False
-    
-    with app.app_context():
-        conv = FileConvertions(path=path, hashval=hash_file(path), convertedpath=newpath)
-        db.session.add(conv)
-        db.session.commit()
+def create_stream(path, streamfile):
+    # os.system(f"{pyffmpeg.FFmpeg().get_ffmpeg_bin()} -i '{path}' -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 128k -vf 'scale=1280:-1' -movflags +faststart -hls_time 5 -hls_list_size 0 -reset_timestamps 1 -hls_segment_filename {streamfile.replace('.m3u8', '') + '_%03d'}.ts {streamfile}")
+    os.system(f"{pyffmpeg.FFmpeg().get_ffmpeg_bin()} -i '{path}' -y -c:s webvtt {streamfile.replace('.m3u8', '') + '_sub'}.vtt")
+    os.system(f"{pyffmpeg.FFmpeg().get_ffmpeg_bin()} -i '{path}'{' -threads 1 ' if LIMITCPU else ' '}-c:v h264 -preset:v ultrafast -crf 23 -c:a copy -b:a 128k -vf 'scale=1280:-1' -movflags +faststart -hls_time 5 -hls_list_size 0 -reset_timestamps 1 -hls_segment_filename {streamfile.replace('.m3u8', '') + '_%03d'}.ts {streamfile}")
 
-    ffbin = pyffmpeg.FFmpeg(enable_log=False).get_ffmpeg_bin()
-    os.system(f"{ffbin} -i \"{path}\" \"{newpath}\" -hide_banner -loglevel error -codec copy")
+def streamcleaner():
+    global runningStreams
 
-    with app.app_context():
-        conv = FileConvertions.query.filter_by(path=path).first()
-        conv.status = True
-        conv.completed_on = datetime.datetime.now(datetime.UTC)
-        db.session.commit()
-    return True
+    while True:
+        print("[INFO] Scanning for not watching streams")
+        for hashval in [k for k in runningStreams.keys()]:
+            if datetime.datetime.now() - runningStreams[hashval][1] > datetime.timedelta(minutes=5):
+                print(f"[INFO] Cleaning up {hashval}")
+                current = runningStreams.pop(hashval)
+                current[0].terminate()
+        time.sleep(60)
 
+def init(configdir, cachedir, limitcpu):
+    global CONFIGDIR, CACHEDIR, LIMITCPU
 
-class FileSystemEventHandler_(FileSystemEventHandler):
-    def on_created(self, event):
-        if not event.is_directory:
-            process = multiprocessing.Process(target=unsupported_file_converter, args=(event.src_path, os.path.join(CACHEDIR, f"{hash_file(event.src_path)}.mp4")))
-            process.daemon = True
-            process.start()
-    
-    def on_moved(self, event):
-        if not event.is_directory:
-            process = multiprocessing.Process(target=unsupported_file_converter, args=(event.dest_path, os.path.join(CACHEDIR, f"{hash_file(event.src_path)}.mp4")))
-            process.daemon = True
-            process.start()
-    
-    def on_deleted(self, event):
-        if not event.is_directory:
-            with app.app_context():
-                fileconvertion = FileConvertions.query.filter_by(path=event.src_path).first()
-                os.remove(fileconvertion.path)
-                db.session.delete(fileconvertion)
-                db.session.commit()
-
-
-def batch_unsupported_file_converter(folderpaths):
-    print("[INFO] Scanning for unsupported file types.")
-    with app.app_context():
-        for basepath in folderpaths:
-            print(f"[INFO] Converting unsupported files in {basepath}.")
-            for root, _, files in os.walk(basepath):
-                for file in files:
-                    if '.'+file.split(".")[-1] in UNSUPPORTED_FILETYPES:
-                        if not os.path.exists(os.path.join(CACHEDIR, f"{hash_file(os.path.join(root, file))}.mp4")):
-                            if FileConvertions.query.filter_by(path=os.path.join(root, file)).first():
-                                os.remove(os.path.join(CACHEDIR, f"{hash_file(os.path.join(root, file))}.mp4"))
-                                db.session.delete(FileConvertions.query.filter_by(path=os.path.join(root, file)).first())
-                                db.session.commit()
-                            unsupported_file_converter(os.path.join(root, file), os.path.join(CACHEDIR, f"{hash_file(os.path.join(root, file))}.mp4"))
-    print("[INFO] Scanned and fixed unsupported file types.")
-
-
-def init(configdir, cachedir):
-    global CACHEDIR, CONFIGDIR
-
-    CACHEDIR = cachedir
     CONFIGDIR = configdir
+    CACHEDIR = cachedir
+    LIMITCPU = limitcpu
 
     os.makedirs(CACHEDIR, exist_ok=True)
     os.makedirs(CONFIGDIR, exist_ok=True)
@@ -115,29 +59,6 @@ def init(configdir, cachedir):
             if not isFirstRun:
                 raise Exception
             
-            total, used, free = shutil.disk_usage(CACHEDIR)
-            if free // (2**30) > 15:
-                process = multiprocessing.Process(target=batch_unsupported_file_converter, args=([basepath.basepath for basepath in FolderPath.query.all()],))
-                process.daemon = True
-                process.start()
-                    
-            print("[INFO] Starting Filesystem Observer.")
-            event_handler = FileSystemEventHandler_()
-            observer = Observer()
-            for basepath in FolderPath.query.all():
-                observer.schedule(event_handler, basepath.basepath, recursive=True)
-            observer.start()
-            print("[INFO] Filesystem Observer started.")
-
-            print("[INFO] Continuing interrupted jobs.")
-            for conv in FileConvertions.query.all():
-                if conv.status:
-                    continue
-                os.remove(conv.convertedpath)
-                process = multiprocessing.Process(target=unsupported_file_converter, args=(conv.path, os.path.join(CACHEDIR, f"{hash_file(conv.path)}.mp4")))
-                process.daemon = True
-                process.start()
-
             print("[INFO] Server started.")
 
         except:
@@ -152,6 +73,9 @@ def init(configdir, cachedir):
                 newConfig = Configuration(key=config, value=DEFAULT_CONFIG[config])
                 db.session.add(newConfig)
                 db.session.commit()
+        
+    streamCleanerThread = threading.Thread(target=streamcleaner)
+    streamCleanerThread.start()
 
 @app.context_processor
 def insert_data():
@@ -171,18 +95,6 @@ def insert_data():
             if Configuration.query.filter_by(key="is_first_run").first()
             else ""
         ),
-        "CURRENT_CONVERTIONS": [
-            {
-                "path": conv.path,
-                "hash": conv.hashval,
-                "convertedpath": conv.convertedpath,
-                "status": True if conv.status == 1 else False,
-                "added_on": conv.added_on,
-                "completed_on": conv.completed_on
-            }
-            for conv in FileConvertions.query.all()
-        ],
-        "CURRENT_CONVERTIONS_COUNT": len(FileConvertions.query.filter_by(status=0).all())
     }
 
 
@@ -227,24 +139,15 @@ def first_setup():
 
 @app.route("/filelisting", methods=["POST"])
 def catch_all():
-    def is_converted(filepath):
-        convertion = FileConvertions.query.filter(FileConvertions.path == filepath).first()
-        if convertion:
-            return {"hash": convertion.hashval, "status": convertion.status, "added_on": convertion.added_on, "completed_on": convertion.completed_on}
-
-        return None
-    
     def default_listing():
-        return {"paths": [{"path": basepath.basepath, "is_dir": True} for basepath in FolderPath.query.all()], "convertion": None, "current": "/"}, 200
+        return {"paths": [{"path": basepath.basepath, "is_dir": True} for basepath in FolderPath.query.all()], "current": "/"}, 200
     
 
     path = request.get_json(force=True).get("path", '/')
     if not path:
         return {"error": "Path not specified"}, 400
-
     if not FolderPath.query.all():
-        return {"error": "No path's added yet. Add one first."}, 404
-
+        return {"error": "No folder's added yet. Add one first."}, 404
     if path == "/":
         return default_listing()
     
@@ -258,7 +161,7 @@ def catch_all():
     if not basePath:
         return default_listing()
     
-    return {"paths": [{"path": f"{path}/{child}", "is_dir": os.path.isdir(f"{path}/{child}"), "convertion": is_converted(f"{path}/{child}") } for child in sorted(os.listdir(path))] + [{"path": '/'.join(path.split('/')[:-1]), "is_dir": True}] , "current": path }, 200
+    return {"paths": [{"path": f"{path}/{child}", "is_dir": os.path.isdir(f"{path}/{child}"), } for child in sorted(os.listdir(path))] + [{"path": '/'.join(path.split('/')[:-1]), "is_dir": True}] , "current": path }, 200
 
 def add_path(path):
     if not (os.path.exists(path) or os.path.isdir(path)):
@@ -273,10 +176,6 @@ def add_path(path):
         db.session.add(newPath)
         db.session.commit()
     
-    process = multiprocessing.Process(target=batch_unsupported_file_converter, args=([basepath.basepath for basepath in FolderPath.query.all()],))
-    process.daemon = True
-    process.start()
-    
     return "Path added", True
 
 
@@ -287,12 +186,10 @@ def add_path_route():
 
     if not pam.authenticate(username, password):
         return {"error": "Invalid credentials"}, 401
-
     if not path:
         return {"error": "Path not specified"}, 400
     
     message, status = add_path(path)
-
     return ({"message": message}, 200) if status else ({"error": message}, 400)
 
 
@@ -318,64 +215,50 @@ def streamready():
     if not os.path.isfile(path):
         return {"error": "Video not found"}, 404
 
-    altfile = os.path.join(CACHEDIR, f"{hash_file(path)}.mp4")
-    for filetype in UNSUPPORTED_FILETYPES:
-        if '.'+path.split(".")[-1] == filetype:
-            if os.path.exists(altfile):
-                path = altfile
-                break
-            else:
-                return {"error": "Not ready yet."}, 400
-    
     probedata = pyffmpeg.FFprobe(path)
 
     if probedata.metadata[0] == []:
         return {"error": "Invalid Media"}, 400
     
+    hashval = hashlib.sha256(path.encode('utf-8')).hexdigest()
+   
+    if hashval not in runningStreams:
+        outputpath = os.path.join(CACHEDIR, f"{hashval}.m3u8")
+        process = multiprocessing.Process(target=create_stream, args=(path, outputpath))
+        process.daemon = True
+        process.start()
+        runningStreams[hashval] = [process, datetime.datetime.now()]
+
+    while not os.path.exists(f"{CACHEDIR}/{hashval}.m3u8"):
+        time.sleep(0.1)
+    
     return {
-        "duration": probedata.duration,
+        "duration": (lambda x: x.second + x.minute * 60 + x.hour * 3600)(datetime.datetime.strptime(probedata.duration, "%H:%M:%S.%f")),
         "filename": probedata.file_name.split("/")[-1],
+        "hashval": hashval,
     }, 200
 
+@app.route("/stream/<fname>", methods=["GET"])
+def stream(fname):
+    fname = fname.replace("..", "").rstrip("/")
+    file_path = os.path.join(CACHEDIR, fname)
 
-@app.route("/stream")
-def stream():
-    path = request.args.get("path")
-    if not path:
-        return {"error": "Path not specified"}, 400
-
-    if not FolderPath.query.all():
-        return {"error": "No path's added yet. Add one first."}, 404
-
-    basePath = FolderPath.query.filter( FolderPath.basepath == path).first()
-    if not basePath:
-        for basepath in FolderPath.query.all():
-            if path.startswith(basepath.basepath):
-                basePath = basepath
-                break
-
-    if not basePath:
-        return {"error": "Invalid path"}, 400
-
-    if not os.path.isfile(path):
-        return Response("Video not found", status=404)
+    if not fname or not os.path.exists(file_path):
+        return Response(status=404)
     
-    probedata = pyffmpeg.FFprobe(path)
+    return send_from_directory(CACHEDIR, fname)
 
-    if probedata.metadata[0] == []:
-        return Response("Invalid Media", status=400)
+@app.route("/stillwatching/<hashval>")
+def isstillwatching(hashval):
+    global runningStreams
+
+    if hashval not in runningStreams:
+        return {"error": "Stream not found"}, 404
     
-    altfile = os.path.join(CACHEDIR, f"{hash_file(path)}.mp4")
-    for filetype in UNSUPPORTED_FILETYPES:
-        if '.'+path.split(".")[-1] == filetype:
-            if os.path.exists(altfile):
-                path = altfile
-                convertion = FileConvertions.query.filter(FileConvertions.path == path).first()
-                if convertion and convertion.status == 0:
-                    return Response("Caching In Progress", status=404)
-                break
-            else:
-                return Response("Not ready yet", status=400)
-            
-    return send_file(path)
+    runningStreams.update({hashval: [runningStreams[hashval][0], datetime.datetime.now()]})
+    return {"message": "updated"}, 200
 
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return {"error": str(e)}, 500

@@ -16,23 +16,26 @@
 </head>
 
 <body>
-    <div style="top: 0; left: 0; position: absolute; padding: 2px; margin: 2px; height: 4vh; display: flex; align-items: center;">
-        <div style="font-size: 1.1rem;" onclick="window.location.href='/'">Uzume | {{INSTANCE_NAME}}</div>
+    <div style="top: 0; left: 0; position: sticky; padding: 4px; margin: 2px; height: 4vh; backdrop-filter: blur(10px);">
+        <div style="font-size: 1.1rem; font-weight: bold;" onclick="window.location.href=''">Uzume | {{INSTANCE_NAME}}</div>
+        <div style="font-size: .8rem;">{{INSTANCE_DESCRIPTION}}</div>
     </div>
-    <div style="position: fixed; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 99vh; width: 95vw; gap: 10vh; margin-top: 6vh; overflow: scroll;">
+    <center>
+        <div id="playerloading" style="font-size: 1.2rem; font-weight: bold; display: none;">Loading...</div>
+        <video controls preload="auto" id="player" style="display: none; height: 90vh; width: 95vw; margin-top: 6vh;"></video>
+    </center>
+    <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 99vh; width: 95vw; gap: 10vh; margin-top: 1vh; overflow: scroll;">
 
         {% if not IS_FIRST_RUN %}
             <div style="bottom: 0; left: 0; margin: 4px; position: fixed; display: flex; gap: 2px;">
                 <button class="button" onclick="enable_single_page('add_folder')">Add Folder</button>
-                <button class="button">Current Convertions: {{CURRENT_CONVERTIONS_COUNT}}</button>
             </div>
 
             <div style="bottom: 0; right: 0; margin: 2px; position: fixed; display: flex; gap: 2px;">
-                <img src="static/uzume-nobg.png" style="height: 20vh;">
+                <img src="static/uzume-nobg.png" style="height: 20vh;" id="uzumeoverlay" onclick="document.getElementById('uzumeoverlay').style.display = 'none';">
             </div>
         {% endif %}
 
-        <video controls preload="auto" data-setup="{}" id="player" style="display: none;"></video>
 
         <div class="container"
             style="width: fit-content; display: none; justify-content: center; align-items: center; gap: 10px;"
@@ -126,6 +129,7 @@
 
 </body>
 
+<script src="static/hls.js@1"></script>
 <script>
     const all_possible_pages = [
         "firstSetup_successpage",
@@ -148,7 +152,7 @@
             return
         }
 
-        fetch("/addpath", {
+        fetch("addpath", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -179,7 +183,7 @@
 
         document.getElementById("currentpath").innerHTML = current
 
-        fetch("/filelisting", {
+        fetch("filelisting", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -198,8 +202,8 @@
             document.getElementById("currentpath").innerHTML = data.current;
             var content = "";
             for (const path of data.paths) {
-                if (path.is_dir) content += `<div class="listingItem" onclick="window.location.href = '/?current=${path.path}'"> ${ (path.path.substring(0, data.current.length) == data.current) ? path.path : '.. (Back)'}</div>`
-                else content += `<div class="listingItem" onclick="window.location.href = '/?play=${path.path}&current=${data.current}'">${path.path} ${ path.convertion ? path.convertion.status == 0 ? ' (Converting - Not Ready for Playback)': '' : '' }</div>`
+                if (path.is_dir) content += `<div class="listingItem" onclick="window.location.href = \`?current=${path.path}\`"> ${ (path.path.substring(0, data.current.length) == data.current) ? path.path : '.. (Back)'}</div>`
+                else content += `<div class="listingItem" onclick="window.location.href = \`?play=${path.path}&current=${data.current}\`">${path.path}</div>`
             }
             document.getElementById("filelisting_content").innerHTML = content;
         })
@@ -230,7 +234,7 @@
             return
         }
 
-        fetch("/firstSetup", {
+        fetch("firstSetup", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -258,33 +262,58 @@
     {% endif %}
     
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("play")) {
+    if (urlParams.get("play") != null) {
         var playURL = urlParams.get("play");
         playURL = playURL.replace("?play=", "");
-
-        fetch("/streamready?path=" + playURL)
+        
+        document.getElementById("playerloading").style.display = "block";
+        fetch("streamready?path=" + playURL)
         .then(response => response.json())
         .then(data => {
+            document.getElementById("playerloading").style.display = "none";
             if (data.error) {
                 document.getElementById("play_error_message").innerHTML = data.error;
                 enable_single_page("play_error");
                 return;
             }
-
-            console.log(data)
-
+            var video = document.getElementById("player");
+            video.setAttribute("duration", data.duration)
             document.getElementById("player").style.display = "block";
-            const newsource = document.createElement("source");
-            newsource.src = "/stream?path=" + playURL;
-            document.getElementById("player").innerHTML = "";
-            document.getElementById("player").appendChild(newsource);
             
+            var vidsrc = "stream/" + data.hashval + ".m3u8";
+            if (Hls.isSupported()) {
+                var hls = new Hls();
+                hls.loadSource(vidsrc);
+                hls.attachMedia(video);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = vidsrc;
+            }
+
+            var track = document.createElement("track");
+            track.kind = "captions";
+            track.label = "Default";
+            track.srclang = "en";
+            track.src = "stream/" + data.hashval + "_sub.vtt";
+            track.default = true;
+            document.getElementById("player").appendChild(track);
+
+            setInterval(() => {
+                fetch("stillwatching/"+data.hashval)
+            }, 10000)
+
             document.getElementById("player").addEventListener("error", (e) => {
-                document.getElementById("play_error_message").innerHTML = e.error;
+                document.getElementById("play_error_message").innerText = e.error;
                 enable_single_page("play_error");
             })
 
         })
+        .catch(error => {
+            document.getElementById("player").display = "none";
+            document.getElementById("playerloading").style.display = "block";
+            document.getElementById("play_error_message").innerText = error;
+            enable_single_page("play_error");
+        })
+
     } else {
         document.getElementById("player").display = "none";
     }
